@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Dispatch — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Tangerine:wght@700&display=swap" rel="stylesheet" />
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="frame">
+    <section class="card">
+      <p class="brand">Daily Dispatch</p>
+      <p class="kicker">Est. every sunrise</p>
+
+      <h1>A quote, and a page of history,<br />sent to your inbox.</h1>
+      <p class="sub">Sign in once with Google. We'll send you something worth reading — every time you do.</p>
+
+      <div class="rule"></div>
+
+      <div id="signInDiv" class="signin-slot"></div>
+
+      <p id="status" class="status" role="status"></p>
+
+      <a class="quiet-link" href="/admin.html">Admin access</a>
+    </section>
+  </main>
+
+  <script>
+    async function init() {
+      const res = await fetch('/config');
+      const { googleClientId } = await res.json();
+
+      if (!googleClientId) {
+        setStatus('Server is missing GOOGLE_CLIENT_ID — check the .env file.', true);
+        return;
+      }
+
+      google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: handleCredentialResponse,
+      });
+
+      google.accounts.id.renderButton(document.getElementById('signInDiv'), {
+        theme: 'outline',
+        size: 'large',
+        shape: 'pill',
+        text: 'continue_with',
+        width: 320,
+      });
+    }
+
+    function setStatus(text, isError) {
+      const el = document.getElementById('status');
+      el.textContent = text;
+      el.classList.toggle('status--error', Boolean(isError));
+    }
+
+    async function handleCredentialResponse(response) {
+      setStatus('Signing in…');
+      try {
+        const res = await fetch('/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: response.credential }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setStatus(`You're in, ${data.name.split(' ')[0]}. Check your inbox.`);
+        } else {
+          setStatus(data.error || 'Sign-in failed. Try again.', true);
+        }
+      } catch (err) {
+        setStatus('Could not reach the server.', true);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
