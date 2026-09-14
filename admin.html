@@ -14,7 +14,6 @@
     <section class="card">
       <p class="brand">Daily Dispatch</p>
       <p class="kicker">Admin</p>
-
       <div id="stage-signin">
         <h1>Sign in as an admin</h1>
         <p class="sub">Only people already on the admin list can view or change it.</p>
@@ -22,51 +21,36 @@
         <div id="signInDiv" class="signin-slot"></div>
         <p id="status" class="status" role="status"></p>
       </div>
-
       <div id="stage-panel" style="display:none;">
         <h1>Manage admins</h1>
         <p class="sub" id="signed-in-as"></p>
         <div class="rule"></div>
-
         <div id="admin-list"></div>
-
         <div class="rule"></div>
-
         <form id="add-form" style="display:flex; gap:8px; margin-bottom:8px;">
           <input class="field" id="new-email" type="email" placeholder="name@company.com" required style="flex:1;" />
           <button class="gold-btn" type="submit" style="width:auto; padding:12px 20px;">Add</button>
         </form>
         <p id="add-status" class="status" role="status"></p>
       </div>
-
       <a class="quiet-link" href="/">Back to sign-in</a>
     </section>
   </main>
-
   <script>
     let credential = null;
 
     async function init() {
-      const res = await fetch('/config');
-      const { googleClientId } = await res.json();
-
-      if (!googleClientId) {
-        setStatus('Server is missing GOOGLE_CLIENT_ID — check the .env file.', true);
-        return;
+      try {
+        const res = await fetch('/config');
+        if (!res.ok) throw new Error('Could not load server configuration.');
+        const { googleClientId } = await res.json();
+        if (!googleClientId) return setStatus('Server is missing GOOGLE_CLIENT_ID — check the environment.', true);
+        if (!window.google?.accounts?.id) return setStatus('Google Sign-In failed to load. Refresh and try again.', true);
+        google.accounts.id.initialize({ client_id: googleClientId, callback: handleCredentialResponse });
+        google.accounts.id.renderButton(document.getElementById('signInDiv'), { theme:'outline', size:'large', shape:'pill', text:'continue_with', width:320 });
+      } catch (error) {
+        setStatus(error.message || 'Could not connect to the server.', true);
       }
-
-      google.accounts.id.initialize({
-        client_id: googleClientId,
-        callback: handleCredentialResponse,
-      });
-
-      google.accounts.id.renderButton(document.getElementById('signInDiv'), {
-        theme: 'outline',
-        size: 'large',
-        shape: 'pill',
-        text: 'continue_with',
-        width: 320,
-      });
     }
 
     function setStatus(text, isError) {
@@ -74,92 +58,67 @@
       el.textContent = text;
       el.classList.toggle('status--error', Boolean(isError));
     }
-
     function setAddStatus(text, isError) {
       const el = document.getElementById('add-status');
       el.textContent = text;
       el.classList.toggle('status--error', Boolean(isError));
     }
 
+    async function api(path, body) {
+      const res = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Server returned an invalid response.'); }
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+      return data;
+    }
+
     async function handleCredentialResponse(response) {
       setStatus('Checking admin access…');
       credential = response.credential;
-      const res = await fetch('/api/admins/list', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        setStatus("That account isn't on the admin list.", true);
+      try {
+        const data = await api('/api/admins/list', { credential });
+        document.getElementById('stage-signin').style.display = 'none';
+        document.getElementById('stage-panel').style.display = 'block';
+        document.getElementById('signed-in-as').textContent = `Signed in as ${data.you}`;
+        renderAdmins(data.admins);
+      } catch (error) {
         credential = null;
-        return;
+        setStatus(error.message || 'Could not verify admin access.', true);
       }
-      document.getElementById('stage-signin').style.display = 'none';
-      document.getElementById('stage-panel').style.display = 'block';
-      document.getElementById('signed-in-as').textContent = `Signed in as ${data.you}`;
-      renderAdmins(data.admins);
     }
 
     function renderAdmins(admins) {
       const list = document.getElementById('admin-list');
-      list.innerHTML = '';
+      list.replaceChildren();
       admins.forEach((a) => {
-        const row = document.createElement('div');
-        row.className = 'admin-row';
-        const added = new Date(a.addedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-        row.innerHTML = `
-          <div>
-            <p class="admin-email">${a.email}</p>
-            <p class="admin-meta">added ${added}</p>
-          </div>
-        `;
-        const btn = document.createElement('button');
-        btn.className = 'remove-btn';
-        btn.textContent = 'Remove';
+        const row = document.createElement('div'); row.className = 'admin-row';
+        const info = document.createElement('div');
+        const email = document.createElement('p'); email.className = 'admin-email'; email.textContent = a.email;
+        const meta = document.createElement('p'); meta.className = 'admin-meta';
+        meta.textContent = `added ${new Date(a.addedAt).toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'})}`;
+        info.append(email, meta);
+        const btn = document.createElement('button'); btn.className = 'remove-btn'; btn.textContent = 'Remove';
         btn.addEventListener('click', () => removeAdmin(a.email));
-        row.appendChild(btn);
-        list.appendChild(row);
+        row.append(info, btn); list.appendChild(row);
       });
     }
 
     async function removeAdmin(email) {
-      setAddStatus('');
-      const res = await fetch('/api/admins/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential, email }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        renderAdmins(data.admins);
-      } else {
-        setAddStatus(data.error || 'Could not remove that admin.', true);
-      }
+      setAddStatus('Removing…');
+      try { const data = await api('/api/admins/remove', { credential, email }); renderAdmins(data.admins); setAddStatus('Admin removed.'); }
+      catch (error) { setAddStatus(error.message || 'Could not remove that admin.', true); }
     }
 
     document.getElementById('add-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const emailField = document.getElementById('new-email');
       const email = emailField.value.trim();
-      if (!email) {
-        setAddStatus('Enter an email address first.', true);
-        return;
-      }
+      if (!email) return setAddStatus('Enter an email address first.', true);
       setAddStatus('Adding…');
-      const res = await fetch('/api/admins/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential, email }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        emailField.value = '';
-        setAddStatus(`${email} can now sign in here as an admin.`);
-        renderAdmins(data.admins);
-      } else {
-        setAddStatus(data.error || 'Could not add that admin.', true);
-      }
+      try {
+        const data = await api('/api/admins/add', { credential, email });
+        emailField.value = ''; renderAdmins(data.admins); setAddStatus(`${email} can now sign in here as an admin.`);
+      } catch (error) { setAddStatus(error.message || 'Could not add that admin.', true); }
     });
 
     init();
