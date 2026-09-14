@@ -1,0 +1,19 @@
+{
+  "name": "daily-dispatch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily Dispatch website and API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.2",
+    "express": "^5.2.1",
+    "google-auth-library": "^11.0.2",
+    "nodemailer": "^10.0.0"
+  }
+}
